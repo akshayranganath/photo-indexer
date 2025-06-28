@@ -49,7 +49,7 @@ class IndexerSettings(BaseModel):
         "yolov10s.pt", description="Weights tag or path for YOLO person detector"
     )
     caption_model: str = Field(
-        "llava-next:latest", description="Ollama model tag for captioning"
+        "llama3.2-vision:latest", description="Ollama model tag for captioning"
     )
 
     # --- External services ---------------------------------------------- #

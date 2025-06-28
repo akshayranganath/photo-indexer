@@ -35,6 +35,7 @@ except ImportError:  # pragma: no cover
 # --------------------------------------------------------------------------- #
 _LOG_CONFIGURED = False
 _DEFAULT_LEVEL = logging.INFO
+_DEFAULT_LEVEL = logging.DEBUG
 
 
 def _configure_root(level: int = _DEFAULT_LEVEL, log_file: Optional[Path] = None) -> None:

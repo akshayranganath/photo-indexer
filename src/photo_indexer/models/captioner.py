@@ -2,7 +2,7 @@
 photo_indexer.models.captioner
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Calls an *Ollama* vision-language model (default **llava-next:latest**) and
+Calls an *Ollama* vision-language model (default **llama3.2-vision:latest**) and
 returns a single-sentence description of the image.
 
 Key points
@@ -31,7 +31,7 @@ import numpy as np
 import requests
 import torch
 from PIL import Image
-
+import json 
 try:
     from photo_indexer.utils.logging import get_logger
 except ImportError:  # pragma: no cover
@@ -50,7 +50,7 @@ log = get_logger(__name__)
 # --------------------------------------------------------------------------- #
 class Captioner:
     """
-    Minimal LLaVA/LLaVA-NeXT client that hits the Ollama REST API.
+    Minimal Llama3.2-Vision client that hits the Ollama REST API.
     """
 
     _DEFAULT_PROMPT = (
@@ -60,7 +60,6 @@ class Captioner:
 
     def __init__(
         self,
-        #model: str = "llava-next:latest",
         model: str = "llama3.2-vision:latest",
         *,
         api_host: str | None = None,
@@ -72,7 +71,7 @@ class Captioner:
         Parameters
         ----------
         model:
-            Name/tag you `ollama pull`’d (e.g. ``llava-next:Q4_K_M``).
+            Name/tag you `ollama pull`'d (e.g. ``llama3.2-vision:latest``).
         api_host:
             Override for the Ollama base URL (default:
             ``$OLLAMA_HOST`` or ``http://localhost:11434``).
@@ -102,7 +101,7 @@ class Captioner:
     # --------------------------------------------------------------------- #
     def __call__(self, image: Any) -> dict[str, str]:
         """
-        Run LLaVA on *image* and return ``{'caption': str}``.
+        Run Llama3.2-Vision on *image* and return ``{'caption': str}``.
         """
         img_b64 = self._to_base64_png(image)
         payload = {
@@ -117,7 +116,9 @@ class Captioner:
             },
         }
 
-        log.debug("POST %s/api/generate  [model=%s]", self.api_host, self.model)
+        log.debug("POST %s/api/generate  [model=%s]", self.api_host, self.model)  
+        with open("/Users/akshayranganath/Downloads/payload.json", "w") as f:
+            json.dump(payload, f, indent=4)
         resp = self._session.post(f"{self.api_host}/api/generate", json=payload, timeout=120)
         resp.raise_for_status()
         data = resp.json()

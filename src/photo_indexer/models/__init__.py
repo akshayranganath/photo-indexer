@@ -6,7 +6,7 @@ Central point for loading the three vision heads used by the pipeline:
 
 * **scene**   → MobileNetV2-Places365 wrapper
 * **people**  → YOLOv10-s person detector / counter
-* **caption** → LLaVA-NeXT captioner (Ollama client)
+* **caption** → Llama3.2-Vision captioner (Ollama client)
 
 The public helper :func:`get_model` hands back a *singleton* of the model you
 ask for, so repeated calls are cheap.

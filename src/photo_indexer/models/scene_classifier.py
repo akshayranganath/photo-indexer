@@ -2,9 +2,9 @@
 photo_indexer.models.scene_classifier
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Thin wrapper around the MobileNetV2-Places365 network.
+Thin wrapper around the AlexNet-Places365 network.
 
-* First call transparently downloads the 13 MB weight file and the
+* First call transparently downloads the ~233 MB weight file and the
   label/IO text files into  ``~/.cache/photo_indexer/``.
 * Accepts either a `PIL.Image`, a `numpy.ndarray` (H × W × 3, RGB),
   or a `torch.Tensor` (C × H × W, [0 … 1]).
@@ -26,7 +26,7 @@ from typing import Tuple
 import torch
 import torch.nn.functional as F
 from torchvision import transforms
-from torchvision.models.mobilenetv2 import MobileNet_V2_Weights, mobilenet_v2
+from torchvision.models import alexnet
 from PIL import Image
 import numpy as np
 
@@ -36,9 +36,10 @@ import numpy as np
 _CACHE = pathlib.Path.home() / ".cache" / "photo_indexer"
 _CACHE.mkdir(parents=True, exist_ok=True)
 
-#"https://csailvision.csail.mit.edu/places/models_weights/"
+# Using PyTorch weights instead of Caffe model
 _WEIGHTS_URL = (    
-    "http://places2.csail.mit.edu/models_places365/alexnet_places365.caffemodel"    
+    "http://places2.csail.mit.edu/models_places365/"
+    "alexnet_places365.pth.tar"    
 )
 
 _CATEGORIES_URL = (
@@ -78,8 +79,7 @@ class SceneClassifier:
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
         # ---------- Make sure files are on disk --------------------------------
-        #weights_path = _CACHE / "mobilenet_v2_places365.pth.tar"
-        weights_path = _CACHE / "alexnet_places365.caffemodel"
+        weights_path = _CACHE / "alexnet_places365.pth.tar"
         cats_path = _CACHE / "categories_places365.txt"
         io_path = _CACHE / "IO_places365.txt"
 
@@ -94,12 +94,26 @@ class SceneClassifier:
         self.io_list: list[int] = [int(line.split(" ")[1]) for line in _load_txt_lines(io_path)]
 
         # ---------- Model ------------------------------------------------------
-        self.model = mobilenet_v2(weights=MobileNet_V2_Weights.IMAGENET1K_V1)
+        self.model = alexnet(pretrained=False)  # Don't load ImageNet weights
         # replace the classifier (last layer) – Places365 has 365 classes
-        self.model.classifier[1] = torch.nn.Linear(self.model.last_channel, 365)
-        state = torch.load(weights_path, map_location="cpu")["state_dict"]
-        # Strip "module." prefix if present (weights trained via DataParallel)
-        self.model.load_state_dict({k.replace("module.", ""): v for k, v in state.items()})
+        self.model.classifier[6] = torch.nn.Linear(4096, 365)
+        
+        # Load Places365 pre-trained weights (PyTorch format)
+        try:
+            checkpoint = torch.load(weights_path, map_location="cpu")
+            # Handle different possible state dict formats
+            if "state_dict" in checkpoint:
+                state_dict = checkpoint["state_dict"]
+            else:
+                state_dict = checkpoint
+            # Strip "module." prefix if present (weights trained via DataParallel)
+            state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+            self.model.load_state_dict(state_dict)
+        except Exception as e:
+            print(f"Warning: Could not load pre-trained weights from {weights_path}")
+            print(f"Error: {e}")
+            print("Using randomly initialized AlexNet instead.")
+        
         self.model.eval().to(self.device)
 
         # ---------- Pre-processing pipeline ------------------------------------
