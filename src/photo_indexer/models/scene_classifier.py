@@ -36,11 +36,10 @@ import numpy as np
 _CACHE = pathlib.Path.home() / ".cache" / "photo_indexer"
 _CACHE.mkdir(parents=True, exist_ok=True)
 
-_WEIGHTS_URL = (
-    "https://csailvision.csail.mit.edu/places/models_weights/"
-    "mobilenet_v2_places365.pth.tar"
+#"https://csailvision.csail.mit.edu/places/models_weights/"
+_WEIGHTS_URL = (    
+    "http://places2.csail.mit.edu/models_places365/alexnet_places365.caffemodel"    
 )
-_WEIGHTS_SHA256 = "b96895590f18e2c0e770f21f1bd89fa3b05b0cc7467d2fa21510e30af964c759"
 
 _CATEGORIES_URL = (
     "https://raw.githubusercontent.com/csailvision/places365/master"
@@ -79,18 +78,20 @@ class SceneClassifier:
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
         # ---------- Make sure files are on disk --------------------------------
-        weights_path = _CACHE / "mobilenet_v2_places365.pth.tar"
+        #weights_path = _CACHE / "mobilenet_v2_places365.pth.tar"
+        weights_path = _CACHE / "alexnet_places365.caffemodel"
         cats_path = _CACHE / "categories_places365.txt"
         io_path = _CACHE / "IO_places365.txt"
 
-        _download(_WEIGHTS_URL, weights_path, sha256=_WEIGHTS_SHA256)
+        _download(_WEIGHTS_URL, weights_path)
         _download(_CATEGORIES_URL, cats_path)
         _download(_IO_URL, io_path)
 
         # ---------- Categories & indoor/outdoor list ---------------------------
         # categories file: "abbey n03425413" – we only need the category name
         self.categories: list[str] = [ln.split(" ")[0] for ln in _load_txt_lines(cats_path)]
-        self.io_list: list[int] = [int(i) for i in _load_txt_lines(io_path)]
+        # Parse IO file: each line contains "category_name index" where index is 0 (indoor) or 1 (outdoor)
+        self.io_list: list[int] = [int(line.split(" ")[1]) for line in _load_txt_lines(io_path)]
 
         # ---------- Model ------------------------------------------------------
         self.model = mobilenet_v2(weights=MobileNet_V2_Weights.IMAGENET1K_V1)

@@ -37,6 +37,7 @@ from typing import Optional
 import click
 
 from photo_indexer.utils.logging import get_logger #,setup
+from photo_indexer.config import IndexerSettings
 
 # -- lazy import to avoid torch startup when showing --help -------------------
 def _lazy_worker_import():
@@ -120,13 +121,15 @@ def cmd_index(
     index_folder = _lazy_worker_import()
 
     try:
-        index_folder(
-            root=photo_root,
+        # Map database backend to file path
+        db_file = f"data/db/photo_index.{db.lower()}"
+        
+        settings = IndexerSettings(
             workers=workers,
-            db_backend=db,
-            thumb_size=thumb_size,
-            dry_run=dry_run,
+            db_path=Path(db_file),
+            thumbnail_size=thumb_size,
         )
+        index_folder(photo_root, settings=settings, dry_run=dry_run)
     except KeyboardInterrupt:
         _log.warning("Interrupted by user – exiting.")
         sys.exit(130)
