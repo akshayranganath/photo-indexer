@@ -17,6 +17,11 @@ You get a single sub-command:
 which walks every *.NEF*, runs the full vision pipeline, and stores the
 results in the chosen database backend.
 
+Captioning supports both local (Ollama) and remote (OpenAI) providers:
+
+    $ pi index /photos --caption-provider ollama  # Uses llama3.2-vision:latest
+    $ pi index /photos --caption-provider openai  # Uses gpt-4o (requires API key)
+
 The entry-point name **`pi`** is registered in *pyproject.toml* so it
 becomes available after
 
@@ -98,6 +103,30 @@ def cli() -> None:  # pragma: no cover
     help="Enable DEBUG-level logging.",
 )
 @click.option(
+    "--caption-provider",
+    type=click.Choice(["ollama", "openai"], case_sensitive=False),
+    default=None,
+    help="Captioning provider: 'ollama' (local) or 'openai' (remote).",
+)
+@click.option(
+    "--caption-model",
+    type=str,
+    default=None,
+    help="Caption model name. Defaults: 'llama3.2-vision:latest' (Ollama) or 'gpt-4o' (OpenAI).",
+)
+@click.option(
+    "--ollama-host",
+    type=str,
+    default=None,
+    help="Ollama host URL (default: http://localhost:11434).",
+)
+@click.option(
+    "--openai-api-key",
+    type=str,
+    default=None,
+    help="OpenAI API key (overrides OPENAI_API_KEY env var).",
+)
+@click.option(
     "--dry-run",
     is_flag=True,
     help="Run pipeline but skip final DB insert (for timing tests).",
@@ -107,12 +136,32 @@ def cmd_index(
     workers: int,
     db: str,
     thumb_size: int,
+    caption_provider: str | None,
+    caption_model: str | None,
+    ollama_host: str | None,
+    openai_api_key: str | None,
     verbose: bool,
     dry_run: bool,
 ) -> None:
     """
     Walk PHOTO_ROOT recursively, process every *.NEF* and write results to
     a local database (default *data/db/photo_index.sqlite*).
+    
+    Captioning can use either local Ollama models or remote OpenAI models:
+    
+    \b
+    # Use local Ollama with default model (llama3.2-vision:latest)
+    pi index /photos --caption-provider ollama
+    
+    \b  
+    # Use OpenAI with default model (gpt-4o) - requires API key
+    pi index /photos --caption-provider openai --openai-api-key sk-...
+    
+    \b
+    # Override specific models
+    pi index /photos --caption-provider openai --caption-model gpt-4-vision-preview
+    
+    Settings can also be configured via ~/.config/photo_indexer/config.yaml
     """
     #setup(verbose=verbose)
 
@@ -124,11 +173,76 @@ def cmd_index(
         # Map database backend to file path
         db_file = f"data/db/photo_index.{db.lower()}"
         
-        settings = IndexerSettings(
-            workers=workers,
-            db_path=Path(db_file),
-            thumbnail_size=thumb_size,
-        )
+        # Load base settings from config file (if exists)
+        from photo_indexer.config import load_config
+        base_settings = load_config()
+        
+        # Override with CLI parameters
+        settings_kwargs = {
+            "workers": workers,
+            "db_path": Path(db_file),
+            "thumbnail_size": thumb_size,
+        }
+        
+        # Override caption provider settings if provided
+        if caption_provider is not None:
+            provider_choice = caption_provider.lower()
+            settings_kwargs["caption_provider"] = provider_choice
+            
+            # Set appropriate default model for the chosen provider if not explicitly specified
+            if caption_model is not None:
+                settings_kwargs["caption_model"] = caption_model
+            else:
+                # Use provider-specific defaults when provider is explicitly chosen
+                if provider_choice == "openai":
+                    settings_kwargs["caption_model"] = "gpt-4o"
+                elif provider_choice == "ollama":
+                    settings_kwargs["caption_model"] = "llama3.2-vision:latest"
+                else:
+                    settings_kwargs["caption_model"] = base_settings.caption_model
+        else:
+            # Use config file settings when no provider specified
+            settings_kwargs["caption_provider"] = base_settings.caption_provider
+            if caption_model is not None:
+                settings_kwargs["caption_model"] = caption_model
+            else:
+                settings_kwargs["caption_model"] = base_settings.caption_model
+            
+        if ollama_host is not None:
+            settings_kwargs["ollama_host"] = ollama_host
+        else:
+            settings_kwargs["ollama_host"] = base_settings.ollama_host
+            
+        if openai_api_key is not None:
+            settings_kwargs["openai_api_key"] = openai_api_key
+        else:
+            settings_kwargs["openai_api_key"] = base_settings.openai_api_key
+        
+        # Copy other caption settings from base config
+        settings_kwargs.update({
+            "caption_prompt": base_settings.caption_prompt,
+            "caption_temperature": base_settings.caption_temperature,
+            "caption_max_tokens": base_settings.caption_max_tokens,
+            "openai_base_url": base_settings.openai_base_url,
+            "scene_model": base_settings.scene_model,
+            "people_model": base_settings.people_model,
+        })
+        
+        settings = IndexerSettings(**settings_kwargs)
+        
+        # Validate OpenAI configuration
+        if settings.caption_provider == "openai":
+            import os
+            api_key = settings.openai_api_key or os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                _log.error("OpenAI provider requires an API key. Provide via --openai-api-key or OPENAI_API_KEY environment variable.")
+                sys.exit(1)
+        
+        # Log the caption provider being used
+        model_source = "user-specified" if caption_model else "default"
+        _log.info("Using caption provider: %s (model: %s, %s)", 
+                 settings.caption_provider, settings.caption_model, model_source)
+        
         index_folder(photo_root, settings=settings, dry_run=dry_run)
     except KeyboardInterrupt:
         _log.warning("Interrupted by user – exiting.")

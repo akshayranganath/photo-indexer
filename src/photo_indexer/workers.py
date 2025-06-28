@@ -46,6 +46,7 @@ except ImportError:  # graceful fallback – no progress bar
         return x
 
 from photo_indexer import get_logger, get_model
+from photo_indexer.models import get_model_with_settings
 from photo_indexer.config import IndexerSettings
 
 log = get_logger(__name__)
@@ -120,9 +121,9 @@ def _process_one(path: Path, settings: IndexerSettings) -> Dict[str, Any]:
     img, exif_dt = _read_nef_thumbnail(path, thumb_px=settings.thumbnail_size)
 
     # ---- Vision heads ----------------------------------------------------
-    scene = get_model("scene")(img)        # {'label', 'indoor'}
-    people = get_model("people")(img)      # {'people', 'count'}
-    caption = get_model("caption")(img)    # {'caption'}
+    scene = get_model("scene")(img)                              # {'label', 'indoor'}
+    people = get_model("people")(img)                            # {'people', 'count'}
+    caption = get_model_with_settings("caption", settings)(img)  # {'caption'}
 
     # ---- Business logic fusion ------------------------------------------
     indoor = scene["indoor"]

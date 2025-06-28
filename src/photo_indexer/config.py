@@ -48,13 +48,34 @@ class IndexerSettings(BaseModel):
     people_model: str = Field(
         "yolov10s.pt", description="Weights tag or path for YOLO person detector"
     )
+    
+    # --- Captioning provider settings ----------------------------------- #
+    caption_provider: str = Field(
+        "ollama", description="Captioning provider: 'ollama' or 'openai'"
+    )
     caption_model: str = Field(
-        "llama3.2-vision:latest", description="Ollama model tag for captioning"
+        "llama3.2-vision:latest", description="Model name for captioning"
+    )
+    caption_prompt: str = Field(
+        "Describe the scene in one concise sentence. If the location is obvious (e.g. beach, glacier, city street) mention it.",
+        description="Custom prompt template for captioning"
+    )
+    caption_temperature: float = Field(
+        0.0, ge=0.0, le=2.0, description="Temperature for caption generation"
+    )
+    caption_max_tokens: int = Field(
+        60, gt=0, description="Maximum tokens for caption generation"
     )
 
     # --- External services ---------------------------------------------- #
     ollama_host: str = Field(
         "http://localhost:11434", description="Base URL of the Ollama daemon"
+    )
+    openai_api_key: str | None = Field(
+        None, description="OpenAI API key (also from OPENAI_API_KEY env var)"
+    )
+    openai_base_url: str = Field(
+        "https://api.openai.com/v1", description="OpenAI API base URL"
     )
 
     class Config:

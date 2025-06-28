@@ -2,22 +2,21 @@
 photo_indexer.models.captioner
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Calls an *Ollama* vision-language model (default **llama3.2-vision:latest**) and
-returns a single-sentence description of the image.
+Flexible vision-language captioning client that supports both local (Ollama) and 
+remote (OpenAI) providers for generating image descriptions.
 
 Key points
 ----------
-* Sends the image as *base-64 PNG* to the Ollama REST endpoint
-  (`POST /api/generate`).
-* Uses a configurable prompt template::
-      "Describe the scene in one sentence. Mention place if obvious."
-* Caches the HTTP session + model name so you pay init cost only once.
-* Accepts PIL.Image, NumPy ndarray or torch.Tensor just like the other heads.
-* Returns ``{'caption': str}`` suitable for the fusion layer.
+* **Ollama provider**: Supports local models like llama3.2-vision:latest
+* **OpenAI provider**: Supports GPT-4 Vision models (gpt-4-vision-preview, gpt-4o, etc.)
+* Unified interface regardless of provider
+* Accepts PIL.Image, NumPy ndarray or torch.Tensor 
+* Returns ``{'caption': str}`` for consistent integration
 
 Environment variables
 ---------------------
-* ``OLLAMA_HOST`` – override host:port (default ``http://localhost:11434``).
+* ``OLLAMA_HOST`` – override Ollama host:port (default ``http://localhost:11434``)
+* ``OPENAI_API_KEY`` – required for OpenAI provider
 """
 
 from __future__ import annotations
@@ -25,13 +24,14 @@ from __future__ import annotations
 import base64
 import io
 import os
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import requests
 import torch
 from PIL import Image
 import json 
+
 try:
     from photo_indexer.utils.logging import get_logger
 except ImportError:  # pragma: no cover
@@ -44,13 +44,15 @@ except ImportError:  # pragma: no cover
 
 log = get_logger(__name__)
 
+ProviderType = Literal["ollama", "openai"]
+
 
 # --------------------------------------------------------------------------- #
 # Captioner                                                                   #
 # --------------------------------------------------------------------------- #
 class Captioner:
     """
-    Minimal Llama3.2-Vision client that hits the Ollama REST API.
+    Unified captioning client supporting both Ollama (local) and OpenAI (remote) providers.
     """
 
     _DEFAULT_PROMPT = (
@@ -60,9 +62,15 @@ class Captioner:
 
     def __init__(
         self,
-        model: str = "llama3.2-vision:latest",
+        provider: ProviderType = "ollama",
+        model: str | None = None,
         *,
-        api_host: str | None = None,
+        # Ollama-specific
+        ollama_host: str | None = None,
+        # OpenAI-specific  
+        openai_api_key: str | None = None,
+        openai_base_url: str = "https://api.openai.com/v1",
+        # Common parameters
         prompt_template: str | None = None,
         temperature: float = 0.0,
         max_tokens: int = 60,
@@ -70,39 +78,90 @@ class Captioner:
         """
         Parameters
         ----------
+        provider:
+            Choose between "ollama" (local) or "openai" (remote).
         model:
-            Name/tag you `ollama pull`'d (e.g. ``llama3.2-vision:latest``).
-        api_host:
-            Override for the Ollama base URL (default:
-            ``$OLLAMA_HOST`` or ``http://localhost:11434``).
+            Model name. Defaults:
+            - Ollama: "llama3.2-vision:latest"  
+            - OpenAI: "gpt-4o"
+        ollama_host:
+            Ollama base URL (default: $OLLAMA_HOST or http://localhost:11434).
+        openai_api_key:
+            OpenAI API key (default: $OPENAI_API_KEY). Required for OpenAI provider.
+        openai_base_url:
+            OpenAI API base URL for custom endpoints.
         prompt_template:
-            Instruction placed *before* the image; use ``{image}`` as placeholder
-            if you need it (rare). Defaults to a built-in one-liner.
+            Custom prompt template. Defaults to built-in scene description prompt.
         temperature / max_tokens:
-            Standard text-generation params forwarded to Ollama.
+            Standard generation parameters.
         """
-        self.model = model
-        self.api_host = api_host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        self.provider = provider
         self.prompt = prompt_template or self._DEFAULT_PROMPT
         self.temperature = temperature
         self.max_tokens = max_tokens
         self._session = requests.Session()
 
-        # Quick sanity check: ping model list once
+        if provider == "ollama":
+            self.model = model or "llama3.2-vision:latest"
+            self.ollama_host = ollama_host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
+            self._setup_ollama()
+        elif provider == "openai":
+            self.model = model or "gpt-4o"
+            self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
+            self.openai_base_url = openai_base_url
+            self._setup_openai()
+        else:
+            raise ValueError(f"Unsupported provider: {provider}")
+
+    def _setup_ollama(self) -> None:
+        """Initialize Ollama provider with connectivity check."""
         try:
-            self._session.get(f"{self.api_host}/api/tags", timeout=2).raise_for_status()
-        except Exception as exc:  # pragma: no cover
+            resp = self._session.get(f"{self.ollama_host}/api/tags", timeout=2)
+            resp.raise_for_status()
+            log.debug("Connected to Ollama at %s", self.ollama_host)
+        except Exception as exc:
             raise RuntimeError(
-                f"Could not connect to Ollama at {self.api_host}. Is the daemon running?"
+                f"Could not connect to Ollama at {self.ollama_host}. Is the daemon running?"
             ) from exc
+
+    def _setup_openai(self) -> None:
+        """Initialize OpenAI provider with API key validation."""
+        if not self.openai_api_key:
+            raise ValueError(
+                "OpenAI API key required. Set OPENAI_API_KEY environment variable "
+                "or pass openai_api_key parameter."
+            )
+        
+        self._session.headers.update({
+            "Authorization": f"Bearer {self.openai_api_key}",
+            "Content-Type": "application/json"
+        })
+        log.debug("Configured OpenAI client for model %s", self.model)
 
     # --------------------------------------------------------------------- #
     # Public API                                                            #
     # --------------------------------------------------------------------- #
     def __call__(self, image: Any) -> dict[str, str]:
         """
-        Run Llama3.2-Vision on *image* and return ``{'caption': str}``.
+        Generate caption for image using the configured provider.
+        
+        Returns
+        -------
+        dict
+            ``{'caption': str}`` containing the generated description.
         """
+        if self.provider == "ollama":
+            return self._call_ollama(image)
+        elif self.provider == "openai":
+            return self._call_openai(image)
+        else:
+            raise ValueError(f"Unknown provider: {self.provider}")
+
+    # --------------------------------------------------------------------- #
+    # Provider implementations                                              #
+    # --------------------------------------------------------------------- #
+    def _call_ollama(self, image: Any) -> dict[str, str]:
+        """Generate caption using Ollama provider."""
         img_b64 = self._to_base64_png(image)
         payload = {
             "model": self.model,
@@ -116,44 +175,88 @@ class Captioner:
             },
         }
 
-        log.debug("POST %s/api/generate  [model=%s]", self.api_host, self.model)  
-        with open("/Users/akshayranganath/Downloads/payload.json", "w") as f:
-            json.dump(payload, f, indent=4)
-        resp = self._session.post(f"{self.api_host}/api/generate", json=payload, timeout=120)
+        log.debug("POST %s/api/generate [provider=ollama, model=%s]", self.ollama_host, self.model)
+        resp = self._session.post(f"{self.ollama_host}/api/generate", json=payload, timeout=120)
         resp.raise_for_status()
         data = resp.json()
         caption = data.get("response", "").strip()
 
         if not caption:
-            log.warning("Empty caption for image!")
+            log.warning("Empty caption from Ollama!")
+        return {"caption": caption}
+
+    def _call_openai(self, image: Any) -> dict[str, str]:
+        """Generate caption using OpenAI provider."""
+        img_data_url = self._to_data_url(image)
+        payload = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": self.prompt},
+                        {"type": "image_url", "image_url": {"url": img_data_url}}
+                    ]
+                }
+            ],
+            "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+        }
+
+        log.debug("POST %s/responses [provider=openai, model=%s]", self.openai_base_url, self.model)
+        with open("/Users/akshayranganath/Downloads/payload.json", "w") as f:
+            json.dump(payload, f)
+        #resp = self._session.post(f"{self.openai_base_url}/chat/completions", json=payload, timeout=120)
+        resp = self._session.post(f"{self.openai_base_url}/responses", json=payload, timeout=120)        
+        resp.raise_for_status()
+        data = resp.json()
+        
+        try:
+            caption = data["choices"][0]["message"]["content"].strip()
+        except (KeyError, IndexError) as exc:
+            log.error("Unexpected OpenAI response format: %s", data)
+            raise RuntimeError("Failed to parse OpenAI response") from exc
+
+        if not caption:
+            log.warning("Empty caption from OpenAI!")
         return {"caption": caption}
 
     # --------------------------------------------------------------------- #
-    # Internals                                                             #
+    # Image processing helpers                                              #
     # --------------------------------------------------------------------- #
     @staticmethod
     def _to_base64_png(x: Any) -> str:
-        """
-        Convert supported image types to *base64-encoded* PNG string
-        (without the data-URI prefix – Ollama wants plain b64).
-        """
+        """Convert image to base64-encoded PNG (for Ollama)."""
+        img = Captioner._normalize_image(x)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        return base64.b64encode(buf.getvalue()).decode("ascii")
+
+    @staticmethod
+    def _to_data_url(x: Any) -> str:
+        """Convert image to data URL (for OpenAI)."""
+        img = Captioner._normalize_image(x)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        return f"data:image/png;base64,{b64}"
+
+    @staticmethod
+    def _normalize_image(x: Any) -> Image.Image:
+        """Convert various image types to PIL.Image."""
         if isinstance(x, Image.Image):
-            img = x.convert("RGB")
+            return x.convert("RGB")
         elif isinstance(x, np.ndarray):
-            if x.ndim == 2:  # gray → RGB
+            if x.ndim == 2:  # grayscale → RGB
                 x = np.stack([x] * 3, axis=-1)
-            img = Image.fromarray(x.astype("uint8"), mode="RGB")
+            return Image.fromarray(x.astype("uint8"), mode="RGB")
         elif isinstance(x, torch.Tensor):
             if x.max() <= 1.0:
                 x = x * 255
             x = x.clip(0, 255).to(torch.uint8).permute(1, 2, 0).cpu().numpy()
-            img = Image.fromarray(x, mode="RGB")
+            return Image.fromarray(x, mode="RGB")
         else:
             raise TypeError(f"Unsupported image type: {type(x)}")
-
-        buf = io.BytesIO()
-        img.save(buf, format="PNG", optimize=True)  # PNG compresses nicely
-        return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
 # --------------------------------------------------------------------------- #
@@ -163,11 +266,14 @@ if __name__ == "__main__":  # pragma: no cover
     import sys
     from pathlib import Path
 
-    if len(sys.argv) != 2:
-        print("Usage: python -m photo_indexer.models.captioner <image>")
+    if len(sys.argv) < 2:
+        print("Usage: python -m photo_indexer.models.captioner <image> [provider]")
+        print("  provider: 'ollama' (default) or 'openai'")
         sys.exit(1)
 
     img_path = Path(sys.argv[1]).expanduser()
-    cap = Captioner()
+    provider = sys.argv[2] if len(sys.argv) > 2 else "ollama"
+    
+    cap = Captioner(provider=provider)
     result = cap(Image.open(img_path))
-    print(result)
+    print(f"[{provider}] {result}")
