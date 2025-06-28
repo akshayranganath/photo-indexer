@@ -145,3 +145,6 @@ photo_index.sqlite
 
 # ignore the data folder
 data/*
+
+# inore the weights file
+*.pt

@@ -60,7 +60,8 @@ class Captioner:
 
     def __init__(
         self,
-        model: str = "llava-next:latest",
+        #model: str = "llava-next:latest",
+        model: str = "llama3.2-vision:latest",
         *,
         api_host: str | None = None,
         prompt_template: str | None = None,

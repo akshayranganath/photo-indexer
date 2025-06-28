@@ -21,6 +21,7 @@ geopy
 tqdm
 pydantic
 click
+pytest
 
 # Optional storage engine
 # duckdb==0.10.0
