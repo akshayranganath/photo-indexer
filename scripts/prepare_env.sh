@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-VENV_DIR="${HOME}/.venvs/photoindex"
+VENV_DIR="/Users/akshayranganath/Downloads/Projects/idea/photo-indexer/venv"
 PY_BIN="$(command -v python3.13 || true)"
 
 # ── 1. sanity checks ────────────────────────────────────────────────────────
