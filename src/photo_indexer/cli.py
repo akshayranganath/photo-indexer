@@ -2,152 +2,147 @@
 photo_indexer.cli
 ~~~~~~~~~~~~~~~~~
 
-Command-line interface for the Photo Indexer.
+Command-line interface for *Photo-Indexer*.
 
-Typical invocations
--------------------
-# Index a folder with the defaults found in ~/.config/photo_indexer/config.yaml
-$ pi index ~/Pictures/DSLR-dump
+The CLI is a thin wrapper that
 
-# Override worker count and DB location on the fly
-$ pi index /mnt/photos --workers 12 --db ~/scratch/photos.db
+1. Boots the global logging system.
+2. Parses user options (via **Click**).
+3. Delegates heavy lifting to :pymod:`photo_indexer.workers`.
 
-# Show the effective configuration then quit
-$ pi config
+You get a single sub-command:
 
-# Print package version
-$ pi version
+    $ pi index /path/to/RAWs  [OPTIONS]
+
+which walks every *.NEF*, runs the full vision pipeline, and stores the
+results in the chosen database backend.
+
+The entry-point name **`pi`** is registered in *pyproject.toml* so it
+becomes available after
+
+    $ pip install -e .
+
+or
+
+    $ poetry install
 """
 
 from __future__ import annotations
 
-import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Optional
 
-from photo_indexer import __version__, get_logger
-from photo_indexer.config import IndexerSettings, load_config
+import click
 
-log = get_logger(__name__)
+from photo_indexer.utils.logging import get_logger #,setup
 
+# -- lazy import to avoid torch startup when showing --help -------------------
+def _lazy_worker_import():
+    #from photo_indexer.workers import run_index  # local import to defer heavy deps    
+    from photo_indexer.workers import index_folder
 
-# --------------------------------------------------------------------------- #
-# Argument parsing                                                            #
-# --------------------------------------------------------------------------- #
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="pi",
-        description="Photo Indexer – turn DSLR RAW dumps into a searchable DB",
-    )
-    sub = parser.add_subparsers(dest="command", required=True)
-
-    # ----- pi index -------------------------------------------------------
-    p_index = sub.add_parser("index", help="Index a folder of RAW/NEF photos")
-    p_index.add_argument("folder", type=Path, help="Directory to recurse into")
-    p_index.add_argument(
-        "-w",
-        "--workers",
-        type=int,
-        help="Override the number of concurrent workers (default from config)",
-    )
-    p_index.add_argument(
-        "--db",
-        dest="db_path",
-        type=Path,
-        help="Override path to SQLite/DuckDB file",
-    )
-    p_index.add_argument(
-        "-c",
-        "--config",
-        type=Path,
-        help="Load settings from an explicit YAML file",
-    )
-    p_index.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Run the pipeline but *do not* write to the DB; emit JSON rows to stdout",
-    )
-
-    # ----- pi config ------------------------------------------------------
-    p_cfg = sub.add_parser("config", help="Print the merged configuration")
-    p_cfg.add_argument(
-        "-c",
-        "--config",
-        type=Path,
-        help="Explicit YAML file to merge with defaults",
-    )
-
-    # ----- pi version -----------------------------------------------------
-    sub.add_parser("version", help="Show package version and exit")
-
-    return parser
+    return index_folder
 
 
-# --------------------------------------------------------------------------- #
-# Sub-command handlers                                                        #
-# --------------------------------------------------------------------------- #
-def _run_index(args: argparse.Namespace) -> None:
-    cfg: IndexerSettings = load_config(args.config)
+_log = get_logger(__name__)
 
-    # Merge CLI overrides
-    updates = {}
-    if args.workers:
-        updates["workers"] = args.workers
-    if args.db_path:
-        updates["db_path"] = args.db_path
-    if updates:
-        cfg = cfg.copy(update=updates)  # type: ignore[arg-type]
 
-    log.info(
-        "Starting indexing run: folder=%s  workers=%d  db=%s",
-        args.folder,
-        cfg.workers,
-        cfg.db_path,
-    )
+# ---------------------------------------------------------------------------#
+# Click helpers                                                               #
+# ---------------------------------------------------------------------------#
+class _PathExists(click.Path):
+    """Click Path subtype that enforces *exists=True* by default."""
+
+    def __init__(self, **kwargs):
+        super().__init__(exists=True, file_okay=True, dir_okay=True, readable=True, **kwargs)
+
+
+@click.group(context_settings=dict(help_option_names=["-h", "--help"]))
+def cli() -> None:  # pragma: no cover
+    """Photo-Indexer command-line tool."""
+    # The group does nothing by itself; sub-commands below do the work.
+
+
+@cli.command("index", help="Index all .NEF photos under PHOTO_ROOT.")
+@click.argument("photo_root", type=_PathExists(path_type=Path))
+@click.option(
+    "--workers",
+    "-w",
+    type=int,
+    metavar="N",
+    default=os.cpu_count(),
+    show_default="CPU core count",
+    help="Concurrent worker threads.",
+)
+@click.option(
+    "--db",
+    type=click.Choice(["sqlite", "duckdb"], case_sensitive=False),
+    default="sqlite",
+    show_default=True,
+    help="Storage backend.",
+)
+@click.option(
+    "--thumb-size",
+    type=int,
+    default=512,
+    show_default=True,
+    help="Longest edge of cached JPEG thumbnails (pixels).",
+)
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Enable DEBUG-level logging.",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Run pipeline but skip final DB insert (for timing tests).",
+)
+def cmd_index(
+    photo_root: Path,
+    workers: int,
+    db: str,
+    thumb_size: int,
+    verbose: bool,
+    dry_run: bool,
+) -> None:
+    """
+    Walk PHOTO_ROOT recursively, process every *.NEF* and write results to
+    a local database (default *data/db/photo_index.sqlite*).
+    """
+    #setup(verbose=verbose)
+
+    _log.info("Photo-Indexer starting (root=%s, workers=%d)", photo_root, workers)
+
+    index_folder = _lazy_worker_import()
 
     try:
-        # Lazy import keeps CLI fast when user only wants `pi version`
-        from photo_indexer.pipelines.workers import index_folder  # noqa: WPS433
-
         index_folder(
-            root=args.folder,
-            settings=cfg,
-            dry_run=args.dry_run,
+            root=photo_root,
+            workers=workers,
+            db_backend=db,
+            thumb_size=thumb_size,
+            dry_run=dry_run,
         )
-    except ImportError as exc:  # pragma: no cover
-        log.error(
-            "Pipeline modules are missing or failed to import: %s\n"
-            "Make sure you've installed all runtime dependencies.",
-            exc,
-        )
+    except KeyboardInterrupt:
+        _log.warning("Interrupted by user – exiting.")
+        sys.exit(130)
+    except Exception as exc:  # pylint: disable=broad-except
+        _log.exception("Fatal error: %s", exc)
         sys.exit(1)
 
-
-def _show_config(args: argparse.Namespace) -> None:
-    cfg = load_config(args.config)
-    import pprint
-
-    pprint.pprint(cfg.dict())
+    _log.info("Done – bye.")
 
 
-# --------------------------------------------------------------------------- #
-# Public entry-point                                                          #
-# --------------------------------------------------------------------------- #
-def main(argv: Optional[list[str]] = None) -> None:  # noqa: D401
-    """Entry-point callable for ``pi`` console script."""
-    parser = _build_parser()
-    args = parser.parse_args(argv)
-
-    match args.command:
-        case "index":
-            _run_index(args)
-        case "config":
-            _show_config(args)
-        case "version":
-            print(__version__)
-        case _:  # pragma: no cover
-            parser.error(f"Unknown command {args.command!r}")
+# ---------------------------------------------------------------------------#
+# Stand-alone invocation (python -m photo_indexer.cli)                        #
+# ---------------------------------------------------------------------------#
+def main() -> None:  # pragma: no cover
+    """Module-level entry-point so `python -m photo_indexer.cli …` works."""
+    cli()
 
 
 if __name__ == "__main__":  # pragma: no cover

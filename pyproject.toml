@@ -1,49 +1,42 @@
-```toml
-[tool.poetry]
-name        = "photo-indexer"
-version     = "0.1.0"
-description = "Offline DSLR photo-indexing pipeline: NEF → thumbnails → vision models → SQLite/ DuckDB."
-authors     = ["Your Name <you@example.com>"]
-license     = "MIT"
-readme      = "README.md"
-packages    = [{ include = "photo_indexer", from = "src" }]
-keywords    = ["photography", "computer-vision", "indexing", "RAW", "NEF"]
-
-[tool.poetry.dependencies]
-python      = "^3.11"
-
-# —–– Core stack —––
-torch       = { version = ">=2.3,<2.4", extras = ["cpu"] }
-torchvision = ">=0.18,<0.19"
-torchaudio  = ">=2.3,<2.4"
-
-rawpy       = "^0.18.1"
-piexif      = "^1.1.3"
-pillow      = ">=10,<12"
-ultralytics = "^8.2.6"
-requests    = "^2.32"
-geopy       = "^2.4"
-tqdm        = "^4.66"
-pydantic    = "^2.7"
-click       = "^8.1"
-
-# —–– Optional columnar DB for analytics —––
-duckdb      = { version = "^0.10", optional = true }
-
-[tool.poetry.extras]
-duckdb = ["duckdb"]
-
-[tool.poetry.group.dev.dependencies]
-pytest      = "^8.0"
-black       = "^24.4"
-isort       = "^5.13"
-mypy        = "^1.10"
-pre-commit  = "^3.7"
-
-[tool.poetry.scripts]
-pi = "photo_indexer.cli:main"
+# pyproject.toml – minimal, Poetry-free
+# ---------------------------------------------------------------------------
 
 [build-system]
-requires      = ["poetry-core>=1.9.0"]
-build-backend = "poetry.core.masonry.api"
-```
+requires      = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# ---------------------------------------------------------------------------
+[project]
+name            = "photo-indexer"
+version         = "0.1.0"
+description     = "Offline DSLR photo-indexing pipeline: NEF → thumbnails → vision models → SQLite/DuckDB."
+readme          = "README.md"
+license         = { text = "MIT" }
+authors         = [{ name = "Akshay Ranganath", email = "rakshay@gmail.com" }]
+requires-python = ">=3.11"
+
+# We’ll import the deps from requirements.txt (see [tool.setuptools.dynamic]).
+# That means you still install them with:  pip install -r requirements.txt
+# and the metadata that ends up inside a wheel / sdist stays in sync.
+
+[project.optional-dependencies]
+duckdb = ["duckdb>=0.10"]
+
+[project.scripts]
+pi = "photo_indexer.cli:main"
+
+# ---------------------------------------------------------------------------
+# Setuptools section
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Dynamically read runtime deps from the same requirements file
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+# Ship the “py.typed” marker so type-checkers see the annotations
+[tool.setuptools.package-data]
+"photo_indexer" = ["py.typed"]
