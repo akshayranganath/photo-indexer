@@ -132,6 +132,10 @@ class Captioner:
                 "or pass openai_api_key parameter."
             )
         
+        # Mask API key for logging (show first 10 and last 4 characters)
+        masked_key = f"{self.openai_api_key[:10]}...{self.openai_api_key[-4:]}"
+        log.debug("Setting up OpenAI client with API key: %s", masked_key)
+        
         self._session.headers.update({
             "Authorization": f"Bearer {self.openai_api_key}",
             "Content-Type": "application/json"
@@ -203,11 +207,34 @@ class Captioner:
             "temperature": self.temperature,
         }
 
-        log.debug("POST %s/responses [provider=openai, model=%s]", self.openai_base_url, self.model)
-        with open("/Users/akshayranganath/Downloads/payload.json", "w") as f:
-            json.dump(payload, f)
-        #resp = self._session.post(f"{self.openai_base_url}/chat/completions", json=payload, timeout=120)
-        resp = self._session.post(f"{self.openai_base_url}/responses", json=payload, timeout=120)        
+        # Debug logging to verify API key is being sent
+        headers_debug = dict(self._session.headers)
+        if 'Authorization' in headers_debug:
+            # Mask the API key for security in logs
+            auth_header = headers_debug['Authorization']
+            if auth_header.startswith('Bearer '):
+                headers_debug['Authorization'] = f"Bearer {auth_header[7:17]}...{auth_header[-4:]}"
+        
+        log.debug("POST %s/chat/completions [provider=openai, model=%s]", self.openai_base_url, self.model)
+        log.debug("Request headers: %s", headers_debug)
+        
+        # Optional: Save payload for debugging (remove in production)
+        # with open("/Users/akshayranganath/Downloads/payload.json", "w") as f:
+        #     json.dump(payload, f, indent=2)
+        
+        resp = self._session.post(f"{self.openai_base_url}/chat/completions", json=payload, timeout=120)        
+        
+        # Enhanced error handling for API key issues
+        if resp.status_code == 401:
+            log.error("OpenAI API authentication failed. Check your API key.")
+            log.error("Response: %s", resp.text)
+            raise RuntimeError("OpenAI API authentication failed - invalid or missing API key")
+        elif resp.status_code == 403:
+            log.error("OpenAI API access forbidden. Check your API key permissions.")
+            raise RuntimeError("OpenAI API access forbidden")
+        elif not resp.ok:
+            log.error("OpenAI API request failed with status %d: %s", resp.status_code, resp.text)
+            
         resp.raise_for_status()
         data = resp.json()
         
@@ -260,6 +287,54 @@ class Captioner:
 
 
 # --------------------------------------------------------------------------- #
+# API Key Test Function                                                        #
+# --------------------------------------------------------------------------- #
+def test_openai_api_key(api_key: str = None) -> bool:
+    """
+    Test if OpenAI API key is valid by making a simple request.
+    
+    Parameters
+    ----------
+    api_key : str, optional
+        API key to test. If None, uses OPENAI_API_KEY env var.
+        
+    Returns
+    -------
+    bool
+        True if API key is valid, False otherwise.
+    """
+    import requests
+    
+    api_key = api_key or os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        print("❌ No API key provided or found in OPENAI_API_KEY env var")
+        return False
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    # Simple test request to list models
+    try:
+        resp = requests.get("https://api.openai.com/v1/models", headers=headers, timeout=10)
+        if resp.status_code == 200:
+            models = resp.json().get("data", [])
+            vision_models = [m["id"] for m in models if "gpt-4" in m["id"] and "vision" in m["id"] or "gpt-4o" in m["id"]]
+            print(f"✅ API key is valid! Found {len(vision_models)} vision models: {vision_models[:3]}")
+            return True
+        elif resp.status_code == 401:
+            print("❌ API key is invalid or expired")
+            return False
+        else:
+            print(f"❌ API request failed with status {resp.status_code}: {resp.text}")
+            return False
+    except Exception as e:
+        print(f"❌ Error testing API key: {e}")
+        return False
+
+
+# --------------------------------------------------------------------------- #
 # Manual test (python -m photo_indexer.models.captioner <image>)              #
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":  # pragma: no cover
@@ -268,8 +343,14 @@ if __name__ == "__main__":  # pragma: no cover
 
     if len(sys.argv) < 2:
         print("Usage: python -m photo_indexer.models.captioner <image> [provider]")
+        print("       python -m photo_indexer.models.captioner --test-api-key")
         print("  provider: 'ollama' (default) or 'openai'")
         sys.exit(1)
+
+    # Test API key functionality
+    if sys.argv[1] == "--test-api-key":
+        test_openai_api_key()
+        sys.exit(0)
 
     img_path = Path(sys.argv[1]).expanduser()
     provider = sys.argv[2] if len(sys.argv) > 2 else "ollama"
