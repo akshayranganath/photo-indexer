@@ -167,6 +167,7 @@ class Captioner:
     def _call_ollama(self, image: Any) -> dict[str, str]:
         """Generate caption using Ollama provider."""
         img_b64 = self._to_base64_png(image)
+        '''
         payload = {
             "model": self.model,
             "prompt": self.prompt,
@@ -178,8 +179,19 @@ class Captioner:
                 "max_tokens": self.max_tokens,
             },
         }
-
+        '''
+        # removing the options field from payload. It was causing a strange error that appeared to make the llama not work.
+        payload = {
+            "model": self.model,
+            "prompt": self.prompt,
+            "images": [img_b64],
+            "stream": False         
+        }
         log.debug("POST %s/api/generate [provider=ollama, model=%s]", self.ollama_host, self.model)
+        
+        #with open("/Users/akshayranganath/Downloads/payload.json", "w") as f:
+        #    json.dump(payload, f, indent=2)
+        
         resp = self._session.post(f"{self.ollama_host}/api/generate", json=payload, timeout=120)
         resp.raise_for_status()
         data = resp.json()
