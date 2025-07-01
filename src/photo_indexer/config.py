@@ -34,7 +34,7 @@ class IndexerSettings(BaseModel):
     # --- General --------------------------------------------------------- #
     workers: int = Field(8, gt=0, description="Max concurrent worker threads")
     db_path: Path = Field(
-        Path("~/photo_index.sqlite").expanduser(),
+        Path("data/db/photo_index.sqlite").expanduser(),
         description="SQLite (or DuckDB) file where rows are stored",
     )
 

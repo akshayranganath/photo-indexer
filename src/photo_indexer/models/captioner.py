@@ -58,6 +58,7 @@ class Captioner:
     _DEFAULT_PROMPT = (
         "Describe the scene in one concise sentence. "
         "If the location is obvious (e.g. beach, glacier, city street) mention it."
+        "Do not start with generic descriptions like 'a photo of' or 'a picture of'."
     )
 
     def __init__(

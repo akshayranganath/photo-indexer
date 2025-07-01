@@ -57,6 +57,9 @@ pi index /Volumes/DSLR_backup --caption-provider ollama --workers 8
 # 5b — Caption provider option 2: OpenAI (remote, requires API key)
 export OPENAI_API_KEY=sk-your-openai-key-here
 pi index /Volumes/DSLR_backup --caption-provider openai --workers 8
+
+# 6 — Browse and search your photos (optional)
+pi ui                                   # Launch web interface on http://localhost:8501
 ```
 
 First run compiles Torch-Metal kernels; expect \~2 min start-up lag.
@@ -87,8 +90,38 @@ A deeper diagram lives in `docs/ARCHITECTURE.md`.
 
 ---
 
+## 🌐 Web Interface
+
+After indexing your photos, launch the web-based search interface:
+
+```bash
+pi ui                                   # Launch on default port 8501
+pi ui --port 8080                       # Custom port
+pi ui --host 0.0.0.0 --port 8080        # Allow external connections
+```
+
+**Features:**
+- **🔍 Full-text search** across photo descriptions, locations, and scenes
+- **📷 Grid-based browsing** with responsive thumbnail layout
+- **📊 Database statistics** showing total photos, scenes, and date ranges
+- **🎯 Smart caching** with automatic thumbnail generation and storage
+- **📱 Responsive design** works on desktop and mobile browsers
+
+**Search examples:**
+- `mountain sunset` - Find mountain scenes at sunset
+- `beach family` - Photos with people at the beach
+- `indoor birthday` - Indoor photos with birthday-related content
+- `outdoor` - All outdoor scenes
+
+The UI automatically connects to your indexed database and provides instant search across all photo metadata.
+
+---
+
 ## 🔧 CLI overview
 
+The `pi` command provides two main functions:
+
+### Indexing Photos
 ```
 Usage: pi index [OPTIONS] PHOTO_ROOT
 
@@ -105,6 +138,18 @@ Options:
   --verbose, -v                        Enable DEBUG-level logging
   --dry-run                            Run pipeline but skip final DB insert (for timing tests)
   --help                               Show this message and exit
+```
+
+### Web Interface
+```
+Usage: pi ui [OPTIONS]
+
+  Launch the web-based photo search interface.
+
+Options:
+  --port INTEGER    Port for the Streamlit web server (default: 8501)
+  --host TEXT       Host address for the Streamlit web server (default: localhost)
+  --help            Show this message and exit
 ```
 
 ---

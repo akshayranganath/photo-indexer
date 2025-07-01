@@ -22,6 +22,6 @@ tqdm
 pydantic
 click
 pytest
-
+streamlit
 # Optional storage engine
 # duckdb==0.10.0

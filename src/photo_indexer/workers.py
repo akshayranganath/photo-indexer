@@ -189,11 +189,13 @@ def _read_nef_thumbnail(path: Path, *, thumb_px: int = 512) -> tuple[Image.Image
 def _ensure_db(path: Path) -> None:
     """
     Create the *photos* table if the DB file is new.
+    Also sets up FTS5 virtual table for full-text search.
     """
     path = Path(path).expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
 
     with sqlite3.connect(path) as conn:
+        # Create main photos table
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS photos (
@@ -208,6 +210,55 @@ def _ensure_db(path: Path) -> None:
             )
             """
         )
+        
+        # Create FTS5 virtual table for full-text search
+        # This enables fast searching across description, location, and scene
+        try:
+            conn.execute(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS photos_fts USING fts5(
+                    file UNINDEXED,
+                    scene,
+                    location, 
+                    description,
+                    content='photos',
+                    content_rowid='rowid'
+                )
+                """
+            )
+            
+            # Create triggers to keep FTS5 table in sync with main table
+            conn.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS photos_fts_insert AFTER INSERT ON photos BEGIN
+                    INSERT INTO photos_fts(file, scene, location, description) 
+                    VALUES (NEW.file, NEW.scene, NEW.location, NEW.description);
+                END
+                """
+            )
+            
+            conn.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS photos_fts_delete AFTER DELETE ON photos BEGIN
+                    DELETE FROM photos_fts WHERE file = OLD.file;
+                END
+                """
+            )
+            
+            conn.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS photos_fts_update AFTER UPDATE ON photos BEGIN
+                    DELETE FROM photos_fts WHERE file = OLD.file;
+                    INSERT INTO photos_fts(file, scene, location, description) 
+                    VALUES (NEW.file, NEW.scene, NEW.location, NEW.description);
+                END
+                """
+            )
+            
+        except sqlite3.OperationalError:
+            # FTS5 not available, that's OK - fallback search will work
+            log.warning("FTS5 not available - full-text search will use fallback LIKE queries")
+        
         conn.commit()
 
 

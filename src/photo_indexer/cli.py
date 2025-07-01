@@ -254,6 +254,77 @@ def cmd_index(
     _log.info("Done – bye.")
 
 
+@cli.command("ui", help="Launch the web-based photo search interface.")
+@click.option(
+    "--port",
+    "-p",
+    type=int,
+    default=8501,
+    show_default=True,
+    help="Port for the Streamlit web server.",
+)
+@click.option(
+    "--host",
+    type=str,
+    default="localhost",
+    show_default=True,
+    help="Host address for the Streamlit web server.",
+)
+def cmd_ui(port: int, host: str) -> None:
+    """
+    Launch the Streamlit web interface for searching and browsing indexed photos.
+    
+    The UI provides:
+    - Full-text search across photo descriptions, locations, and scenes
+    - Grid-based photo browsing with thumbnails
+    - Photo metadata display (date, people count, etc.)
+    - Database statistics and management
+    
+    \b
+    Example usage:
+    pi ui                    # Launch on default port 8501
+    pi ui --port 8080        # Launch on custom port
+    pi ui --host 0.0.0.0     # Allow external connections
+    
+    Once running, open your browser to http://localhost:8501 (or your chosen host/port).
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+    
+    # Get the path to the Streamlit app
+    app_path = Path(__file__).parent / "ui" / "app.py"
+    
+    if not app_path.exists():
+        _log.error("UI app not found at %s", app_path)
+        sys.exit(1)
+    
+    _log.info("Starting Photo-Indexer web UI on %s:%d", host, port)
+    _log.info("Open your browser to: http://%s:%d", host, port)
+    
+    try:
+        # Launch Streamlit
+        cmd = [
+            sys.executable, "-m", "streamlit", "run", 
+            str(app_path),
+            "--server.port", str(port),
+            "--server.address", host,
+            "--server.headless", "true",
+            "--browser.gatherUsageStats", "false"
+        ]
+        
+        subprocess.run(cmd, check=True)
+        
+    except subprocess.CalledProcessError as e:
+        _log.error("Failed to start Streamlit: %s", e)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        _log.info("Web UI stopped by user.")
+    except Exception as exc:
+        _log.exception("Error running web UI: %s", exc)
+        sys.exit(1)
+
+
 # ---------------------------------------------------------------------------#
 # Stand-alone invocation (python -m photo_indexer.cli)                        #
 # ---------------------------------------------------------------------------#
