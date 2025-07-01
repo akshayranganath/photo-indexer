@@ -59,7 +59,8 @@ class Captioner:
     _DEFAULT_PROMPT = (
         "Describe the scene in one concise sentence. "
         "If the location is obvious (e.g. beach, glacier, city street) mention it."
-        "Do not start with generic descriptions like 'a photo of' or 'a picture of'."
+        "Do not start with generic descriptions like 'the image depicts', 'a photo of' or 'a picture of'."
+        "Just provide the description of the image, nothing else."
     )
 
     def __init__(
@@ -236,7 +237,7 @@ class Captioner:
         #with open("/Users/akshayranganath/Downloads/payload.json", "w") as f:
         #    json.dump(payload, f, indent=2)
         
-        resp = self._session.post(f"{self.ollama_host}/api/generate", json=payload, timeout=120)
+        resp = self._session.post(f"{self.ollama_host}/api/generate", json=payload, timeout=300)
         resp.raise_for_status()
         data = resp.json()
         caption = data.get("response", "").strip()
