@@ -174,6 +174,15 @@ Options:
   pi index ~/photos --workers 8
   ```
 
+### Real World Results
+
+I tested the code on my Macbook air laptop. It is an Apple Silicaon machine with 32 GB RAM. 
+
+* When I ran the toll with default 8 worker threads, `ollama` requests would start to time out. It would time-out most requests at 120s.
+* I reduced the workers to 1 and increased the timeout to 5 minutes. 
+* For 83 images, it took close to 8 hours to complete.
+
+Using Ollama is phenomenally slow. However, a photographer is not going to shoot daily. Letting this run on one batch through the night can provied a decent and cost-effective solution.
 ---
 
 ## 📄 License
