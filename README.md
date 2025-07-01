@@ -183,6 +183,7 @@ I tested the code on my Macbook air laptop. It is an Apple Silicaon machine with
 * For 83 images, it took close to 8 hours to complete.
 
 Using Ollama is phenomenally slow. However, a photographer is not going to shoot daily. Letting this run on one batch through the night can provied a decent and cost-effective solution.
+
 ---
 
 ## 📄 License
