@@ -10,7 +10,7 @@ Designed for a **CPU-only MacBook with 32 GB RAM (Metal/MPS available)**, but sc
 | Thumbnail + EXIF             | `rawpy`, `piexif`               | 512 px RGB JPEG, `DateTimeOriginal`, GPS |
 | Scene label & indoor/outdoor | AlexNet-Places365               | e.g. `outdoor`, `mountain`               |
 | Person detection & count     | YOLOv10-s                       | `people =true`, `count = 4`              |
-| Caption & fallback location  | **Ollama** (llama3.2-vision) **or** **OpenAI** (gpt-4o) | One-sentence caption                     |
+| Caption & fallback location  | **Ollama** (llama3.2-vision), **OpenAI** (gpt-4o), **or** **BLIP-2** (Salesforce/blip2-opt-2.7b) | One-sentence caption                     |
 | Fusion & storage             | Python                          | One row per photo in SQLite + FTS5       |
 
 ---
@@ -18,7 +18,7 @@ Designed for a **CPU-only MacBook with 32 GB RAM (Metal/MPS available)**, but sc
 ## ✨ Features
 
 * **100 % open source** – only PyPI wheels and model checkpoints.
-* **Flexible captioning** – choose between local Ollama models or cloud OpenAI vision models.
+* **Flexible captioning** – choose between local Ollama models, lightweight BLIP-2, or cloud OpenAI vision models.
 * **Offline-capable** – pull models once, index with zero network (when using Ollama).
 * **Thread-pooled** – keeps all CPU cores busy; overlaps disk I/O and REST calls.
 * **Pluggable** – swap SQLite for DuckDB, configure caption providers via CLI or config file.
@@ -54,7 +54,10 @@ bash scripts/download_weights.sh    # AlexNet-Places365 files, sample NEFs
 ollama pull llama3.2-vision:latest  # or llava-next:latest
 pi index /Volumes/DSLR_backup --caption-provider ollama --workers 8
 
-# 5b — Caption provider option 2: OpenAI (remote, requires API key)
+# 5b — Caption provider option 2: BLIP-2 (local, fast CPU inference)
+pi index /Volumes/DSLR_backup --caption-provider blip2 --workers 8
+
+# 5c — Caption provider option 3: OpenAI (remote, requires API key)
 export OPENAI_API_KEY=sk-your-openai-key-here
 pi index /Volumes/DSLR_backup --caption-provider openai --workers 8
 
@@ -131,8 +134,8 @@ Options:
   --workers INTEGER                    Concurrent threads (default: CPU count)
   --db {sqlite,duckdb}                 Storage backend (default: sqlite)
   --thumb-size INTEGER                 Long-edge pixels for JPEG cache (default: 512)
-  --caption-provider {ollama,openai}   Captioning provider: 'ollama' (local) or 'openai' (remote)
-  --caption-model TEXT                 Caption model name. Defaults: 'llama3.2-vision:latest' (Ollama) or 'gpt-4o' (OpenAI)
+  --caption-provider {ollama,openai,blip2}   Captioning provider: 'ollama' (local), 'openai' (remote), or 'blip2' (local)
+  --caption-model TEXT                       Caption model name. Defaults: 'llama3.2-vision:latest' (Ollama), 'gpt-4o' (OpenAI), or 'Salesforce/blip2-opt-2.7b' (BLIP-2)
   --ollama-host TEXT                   Ollama host URL (default: http://localhost:11434)
   --openai-api-key TEXT                OpenAI API key (overrides OPENAI_API_KEY env var)
   --verbose, -v                        Enable DEBUG-level logging
@@ -158,9 +161,10 @@ Options:
 
 * Use `--workers 6-8` on a 10-core Apple Silicon; higher counts seldom help.
 * Keep the laptop on mains – Metal can fall back to CPU on low battery.
-* **Ollama vs OpenAI trade-offs:**
-  - **Ollama**: Slower but private, offline-capable, free after model download
-  - **OpenAI**: Faster, higher quality, but requires internet and costs per image (~$0.01-0.02/image)
+* **Caption provider trade-offs:**
+  - **Ollama**: Best quality but slower, private, offline-capable, free after model download
+  - **BLIP-2**: Fast CPU inference, good quality, private, offline, free - ideal for CPU-only setups
+  - **OpenAI**: Fastest, excellent quality, but requires internet and costs per image (~$0.01-0.02/image)
 * Configure via file instead of CLI for complex setups:
 
   ```bash

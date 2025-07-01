@@ -104,15 +104,15 @@ def cli() -> None:  # pragma: no cover
 )
 @click.option(
     "--caption-provider",
-    type=click.Choice(["ollama", "openai"], case_sensitive=False),
+    type=click.Choice(["ollama", "openai", "blip2"], case_sensitive=False),
     default=None,
-    help="Captioning provider: 'ollama' (local) or 'openai' (remote).",
+    help="Captioning provider: 'ollama' (local), 'openai' (remote), or 'blip2' (local).",
 )
 @click.option(
     "--caption-model",
     type=str,
     default=None,
-    help="Caption model name. Defaults: 'llama3.2-vision:latest' (Ollama) or 'gpt-4o' (OpenAI).",
+    help="Caption model name. Defaults: 'llama3.2-vision:latest' (Ollama), 'gpt-4o' (OpenAI), or 'Salesforce/blip2-opt-2.7b' (BLIP-2).",
 )
 @click.option(
     "--ollama-host",
@@ -147,11 +147,15 @@ def cmd_index(
     Walk PHOTO_ROOT recursively, process every *.NEF* and write results to
     a local database (default *data/db/photo_index.sqlite*).
     
-    Captioning can use either local Ollama models or remote OpenAI models:
+    Captioning supports three providers: local Ollama, local BLIP-2, or remote OpenAI:
     
     \b
     # Use local Ollama with default model (llama3.2-vision:latest)
     pi index /photos --caption-provider ollama
+    
+    \b
+    # Use local BLIP-2 for fast CPU inference (Salesforce/blip2-opt-2.7b)
+    pi index /photos --caption-provider blip2
     
     \b  
     # Use OpenAI with default model (gpt-4o) - requires API key
@@ -160,6 +164,7 @@ def cmd_index(
     \b
     # Override specific models
     pi index /photos --caption-provider openai --caption-model gpt-4-vision-preview
+    pi index /photos --caption-provider blip2 --caption-model Salesforce/blip2-flan-t5-xl
     
     Settings can also be configured via ~/.config/photo_indexer/config.yaml
     """
@@ -198,6 +203,8 @@ def cmd_index(
                     settings_kwargs["caption_model"] = "gpt-4o"
                 elif provider_choice == "ollama":
                     settings_kwargs["caption_model"] = "llama3.2-vision:latest"
+                elif provider_choice == "blip2":
+                    settings_kwargs["caption_model"] = "Salesforce/blip2-opt-2.7b"
                 else:
                     settings_kwargs["caption_model"] = base_settings.caption_model
         else:

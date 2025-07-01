@@ -2,13 +2,14 @@
 photo_indexer.models.captioner
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Flexible vision-language captioning client that supports both local (Ollama) and 
+Flexible vision-language captioning client that supports local (Ollama, BLIP-2) and 
 remote (OpenAI) providers for generating image descriptions.
 
 Key points
 ----------
 * **Ollama provider**: Supports local models like llama3.2-vision:latest
 * **OpenAI provider**: Supports GPT-4 Vision models (gpt-4-vision-preview, gpt-4o, etc.)
+* **BLIP-2 provider**: Lightweight Hugging Face model (Salesforce/blip2-opt-2.7b)
 * Unified interface regardless of provider
 * Accepts PIL.Image, NumPy ndarray or torch.Tensor 
 * Returns ``{'caption': str}`` for consistent integration
@@ -44,7 +45,7 @@ except ImportError:  # pragma: no cover
 
 log = get_logger(__name__)
 
-ProviderType = Literal["ollama", "openai"]
+ProviderType = Literal["ollama", "openai", "blip2"]
 
 
 # --------------------------------------------------------------------------- #
@@ -80,11 +81,12 @@ class Captioner:
         Parameters
         ----------
         provider:
-            Choose between "ollama" (local) or "openai" (remote).
+            Choose between "ollama" (local), "openai" (remote), or "blip2" (local).
         model:
             Model name. Defaults:
             - Ollama: "llama3.2-vision:latest"  
             - OpenAI: "gpt-4o"
+            - BLIP-2: "Salesforce/blip2-opt-2.7b"
         ollama_host:
             Ollama base URL (default: $OLLAMA_HOST or http://localhost:11434).
         openai_api_key:
@@ -111,6 +113,9 @@ class Captioner:
             self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
             self.openai_base_url = openai_base_url
             self._setup_openai()
+        elif provider == "blip2":
+            self.model = model or "Salesforce/blip2-opt-2.7b"
+            self._setup_blip2()
         else:
             raise ValueError(f"Unsupported provider: {provider}")
 
@@ -143,6 +148,42 @@ class Captioner:
         })
         log.debug("Configured OpenAI client for model %s", self.model)
 
+    def _setup_blip2(self) -> None:
+        """Initialize BLIP-2 provider with model loading."""
+        try:
+            from transformers import Blip2Processor, Blip2ForConditionalGeneration
+            log.debug("Loading BLIP-2 model: %s", self.model)
+            
+            # Load model and processor - use CPU for better compatibility
+            self.blip2_processor = Blip2Processor.from_pretrained(self.model)
+            self.blip2_model = Blip2ForConditionalGeneration.from_pretrained(
+                self.model, 
+                torch_dtype=torch.float32,  # Use float32 for CPU compatibility
+                device_map="auto" if torch.cuda.is_available() else None
+            )
+            
+            # Move to appropriate device
+            if torch.cuda.is_available():
+                device = "cuda"
+            elif torch.backends.mps.is_available():
+                device = "mps"
+            else:
+                device = "cpu"
+            
+            self.blip2_device = device
+            if device != "cuda":  # device_map="auto" handles CUDA placement
+                self.blip2_model = self.blip2_model.to(device)
+            
+            log.info("Loaded BLIP-2 model %s on device: %s", self.model, device)
+            
+        except ImportError as exc:
+            raise RuntimeError(
+                "BLIP-2 provider requires transformers library. "
+                "Install with: pip install transformers"
+            ) from exc
+        except Exception as exc:
+            raise RuntimeError(f"Failed to load BLIP-2 model {self.model}") from exc
+
     # --------------------------------------------------------------------- #
     # Public API                                                            #
     # --------------------------------------------------------------------- #
@@ -159,6 +200,8 @@ class Captioner:
             return self._call_ollama(image)
         elif self.provider == "openai":
             return self._call_openai(image)
+        elif self.provider == "blip2":
+            return self._call_blip2(image)
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
 
@@ -261,6 +304,59 @@ class Captioner:
             log.warning("Empty caption from OpenAI!")
         return {"caption": caption}
 
+    def _call_blip2(self, image: Any) -> dict[str, str]:
+        """Generate caption using BLIP-2 provider."""
+        img_pil = self._normalize_image(image)
+        
+        log.debug("Generating caption with BLIP-2 model %s", self.model)
+        
+        try:
+            # Process image and generate caption
+            inputs = self.blip2_processor(img_pil, return_tensors="pt").to(self.blip2_device)
+            
+            # Generate with specified parameters
+            with torch.no_grad():
+                generated_ids = self.blip2_model.generate(
+                    **inputs,
+                    max_new_tokens=self.max_tokens,
+                    do_sample=True if self.temperature > 0 else False,
+                    temperature=max(self.temperature, 0.1),  # Avoid zero temperature
+                    num_beams=3,  # Use beam search for better quality
+                    early_stopping=True,
+                )
+            
+            # Decode the generated caption
+            caption = self.blip2_processor.decode(
+                generated_ids[0], 
+                skip_special_tokens=True
+            ).strip()
+            
+            # Remove common prefixes that BLIP-2 sometimes adds
+            prefixes_to_remove = [
+                "a photo of ", "an image of ", "a picture of ",
+                "the image shows ", "this image shows ", "there is "
+            ]
+            
+            caption_lower = caption.lower()
+            for prefix in prefixes_to_remove:
+                if caption_lower.startswith(prefix):
+                    caption = caption[len(prefix):]
+                    break
+            
+            # Capitalize first letter
+            if caption:
+                caption = caption[0].upper() + caption[1:]
+            
+            if not caption:
+                log.warning("Empty caption from BLIP-2!")
+                caption = "Image content could not be described"
+                
+            return {"caption": caption}
+            
+        except Exception as exc:
+            log.error("BLIP-2 inference failed: %s", exc)
+            return {"caption": "Error generating caption"}
+
     # --------------------------------------------------------------------- #
     # Image processing helpers                                              #
     # --------------------------------------------------------------------- #
@@ -357,7 +453,7 @@ if __name__ == "__main__":  # pragma: no cover
     if len(sys.argv) < 2:
         print("Usage: python -m photo_indexer.models.captioner <image> [provider]")
         print("       python -m photo_indexer.models.captioner --test-api-key")
-        print("  provider: 'ollama' (default) or 'openai'")
+        print("  provider: 'ollama' (default), 'openai', or 'blip2'")
         sys.exit(1)
 
     # Test API key functionality

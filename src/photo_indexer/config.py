@@ -51,7 +51,7 @@ class IndexerSettings(BaseModel):
     
     # --- Captioning provider settings ----------------------------------- #
     caption_provider: str = Field(
-        "ollama", description="Captioning provider: 'ollama' or 'openai'"
+        "ollama", description="Captioning provider: 'ollama', 'openai', or 'blip2'"
     )
     caption_model: str = Field(
         "llama3.2-vision:latest", description="Model name for captioning"

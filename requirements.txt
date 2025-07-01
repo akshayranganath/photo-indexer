@@ -12,6 +12,7 @@
 torch
 torchvision
 torchaudio
+transformers
 rawpy
 piexif
 Pillow
